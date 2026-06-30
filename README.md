@@ -1,0 +1,43 @@
+# ssu-ai-service
+
+숭실대학교 AI 플랫폼의 **B2B 임베딩 서빙 게이트웨이**. FastAPI로 텍스트 임베딩(Gemini `text-embedding-004`, MRL 768차원)을 단일 엔드포인트로 노출한다. ssuMCP/ssuAI 본체와 분리된 독립 서비스로, "모델 서빙 표면을 따로 둘 때의 인증·키 위생 설계"를 증명하는 포트폴리오 조각이다.
+
+## 엔드포인트
+
+| 메서드 | 경로 | 인증 | 설명 |
+|---|---|---|---|
+| GET | `/health` | 없음 | 헬스 체크(k8s liveness). 키 값은 노출하지 않고 설정 여부만 보고 |
+| POST | `/v1/embeddings` | `X-API-Key` 필수 | `{"text": "..."}` → `{"embedding": [...768], "dimension": 768}` |
+
+## 보안 설계 (2026-06-30 하드닝)
+
+이 서비스는 초기 버전에 세 가지 결함이 있었고, 살리면서 모두 교정했다.
+
+1. **업스트림 키를 URL 쿼리스트링에서 헤더로 이동** — 기존에는 Gemini 키를 `?key=...`로 보내 액세스 로그·프록시에 평문 노출 위험이 있었다. 이제 `Authorization: Bearer` 헤더로 전송한다.
+2. **인바운드 인증 게이트(fail-closed)** — `/v1/embeddings`는 `X-API-Key`가 `SSUAI_SERVICE_API_KEY`와 일치해야 한다. 키가 **미설정이면 열어두는 게 아니라 401로 닫는다**(누구나 호출해 LLM 비용을 소진하던 표면 차단). cf. ssuAgent `/agent`의 `AGENT_API_KEY` 게이트와 같은 원칙.
+3. **업스트림 에러 비반사** — 기존에는 Gemini 응답 본문을 그대로 호출자에게 되돌려줬다. 이제 업스트림 상세는 **서버 로그에만** 남기고, 호출자에게는 일반화된 메시지(`502 embedding upstream error` 등)만 반환한다.
+
+## 환경 변수
+
+| 변수 | 설명 |
+|---|---|
+| `SSUAI_GEMINI_API_KEY` | (업스트림) Gemini 임베딩 API 키. 미설정 시 `/v1/embeddings`는 503 |
+| `SSUAI_SERVICE_API_KEY` | (인바운드) 호출자가 `X-API-Key`로 제시할 자격증명. 미설정 시 게이트가 fail-closed(401) |
+
+## 실행
+
+```bash
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+# 또는 컨테이너
+docker build -t ssu-ai-service . && docker run -p 8000:8000 \
+  -e SSUAI_GEMINI_API_KEY=... -e SSUAI_SERVICE_API_KEY=... ssu-ai-service
+```
+
+## 테스트
+
+```bash
+pytest -q
+```
+
+헬스, 인바운드 키 미제시 → 401, 키 일치하지만 업스트림 미설정 → 503, 잘못된 키 → 401을 검증한다(실제 업스트림 호출 없이).
