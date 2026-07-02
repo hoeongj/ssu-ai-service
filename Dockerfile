@@ -9,7 +9,8 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM python:3.11-alpine AS runner
 
 WORKDIR /app
-RUN addgroup -S app && adduser -S -G app app
+# Numeric uid so Kubernetes runAsNonRoot can verify the user without guessing.
+RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
 COPY --from=builder /install /usr/local
 COPY app/ ./app/
 

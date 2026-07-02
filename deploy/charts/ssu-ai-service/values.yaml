@@ -61,6 +61,8 @@ probes:
 # so runAsNonRoot is enforced here.
 containerSecurityContext:
   runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: false
   capabilities:
