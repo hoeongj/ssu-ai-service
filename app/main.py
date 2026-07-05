@@ -43,9 +43,14 @@ def require_api_key(x_api_key: str = Header(default="")) -> None:
     """Inbound auth gate. Fails closed when SSUAI_SERVICE_API_KEY is unset.
 
     Uses a constant-time comparison so the check does not leak the key length or a
-    matching prefix through response timing.
+    matching prefix through response timing. Compares UTF-8 bytes rather than str:
+    Starlette decodes header values as latin-1, so a non-ASCII X-API-Key would make
+    secrets.compare_digest raise TypeError (str compare rejects non-ASCII) and surface
+    a confusing 500 instead of this clean 401.
     """
-    if not SERVICE_API_KEY or not secrets.compare_digest(x_api_key, SERVICE_API_KEY):
+    if not SERVICE_API_KEY or not secrets.compare_digest(
+        x_api_key.encode("utf-8"), SERVICE_API_KEY.encode("utf-8")
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing api key")
 
 

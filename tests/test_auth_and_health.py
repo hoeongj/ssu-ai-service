@@ -82,6 +82,21 @@ def test_embeddings_wrong_key_rejected(monkeypatch):
     assert response.status_code == 401
 
 
+def test_embeddings_non_ascii_key_rejected_cleanly(monkeypatch):
+    # A non-ASCII X-API-Key (latin-1 decoded by Starlette) must fail closed with 401,
+    # not raise a TypeError inside the constant-time compare and surface a 500.
+    monkeypatch.setattr(main, "SERVICE_API_KEY", "correct-key")
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/embeddings",
+            json={"text": "test"},
+            # Raw latin-1 bytes: a real client can put byte 0xF8 in the header, which
+            # Starlette decodes back to the non-ASCII str "wrøng-key" server-side.
+            headers={"X-API-Key": "wrøng-key".encode("latin-1")},
+        )
+    assert response.status_code == 401
+
+
 def test_embeddings_happy_path_returns_capped_vector(monkeypatch):
     # Inbound auth + upstream both configured; upstream returns a long vector that the
     # gateway caps to EMBEDDING_DIM before returning.
